@@ -1,0 +1,30 @@
+#!/bin/bash
+## resolve links - $0 may be a link to home
+PRG=$0
+
+while [ -h "$PRG" ] ; do
+  ls=`ls -ld "$PRG"`
+  link=`expr "$ls" : '.*-> \(.*\)$'`
+  if expr "$link" : '.*/.*' > /dev/null; then
+    PRG="$link"
+  else
+    PRG="`dirname $PRG`/$link"
+  fi
+done
+
+if [ -z "$CLOJURE_HOME" ] ; then
+  CLOJURE_HOME_1=`dirname "$PRG"`           # the ./bin dir
+  CLOJURE_HOME=`dirname "$CLOJURE_HOME_1"`   # the . dir
+fi
+
+# load compojure and deps
+for f in lib/compojure/*.jar; do
+    CLASSPATH=$CLASSPATH:$f
+done
+CLASSPATH=`cygpath --path --windows "$CLASSPATH:./lib/jl1.0.1.jar:./lib/tritonus_share.jar:./lib/mp3spi1.9.4.jar:.:./src:./classes:$CLOJURE_HOME/jline.jar:$CLOJURE_HOME/clojure.jar:$CLOJURE_HOME/clojure-contrib.jar:/opt/lib/derby.jar"`
+
+if [ $# -gt 0 ] ; then
+   java -Xmx1024m -cp $CLASSPATH clojure.lang.Script "$@"
+else
+   java -cp $CLASSPATH jline.ConsoleRunner clojure.lang.Repl
+fi
