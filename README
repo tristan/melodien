@@ -1,0 +1,7 @@
+A Clojure based music organiser.
+
+essentially just a tool for me to mess around in clojure with.
+
+Requirements:
+compojure: https://github.com/weavejester/compojure
+javazoom mp3spi: http://www.javazoom.net/mp3spi/mp3spi.html

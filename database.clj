@@ -58,3 +58,7 @@ comments
 (defn add-mp3s-from-folder [dir]
   (sql/with-connection db
     (doseq [mp3s (utils/scan-for-mp3s dir)] (sql/insert-records :mp3s mp3s))))
+
+(defn run-sql-query [query]
+  (sql/with-connection db
+    (sql/with-query-results res [query] (doall res))))
