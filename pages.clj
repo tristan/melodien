@@ -1,5 +1,6 @@
 (ns pages
-  (:require pages.whiteboard))
+  (:require pages.whiteboard)
+  (:use [compojure.http.helpers :only (serve-file)]))
 
 (defn whiteboard []
   (pages.whiteboard/artists))
@@ -9,8 +10,9 @@
   
 
 (def patterns (list
-		{:regex #"^whiteboard/" :fn whiteboard}
+		{:regex #"^whiteboard/" :fn (fn [] (whiteboard))}
 		{:regex #"^test/([a-z]+)/$" :fn (fn [txt] (testview txt))}
+		{:regex #"^javascript/([\s\S]+)$" :fn (fn [path] (serve-file "js" path))}
 		))
 
 (defn dispatch [path]
@@ -19,6 +21,7 @@
       (do
 	(println "PAGE NOT FOUND: " path) 
 	nil)
-      (let [parameters (rest (re-matches (pattern :regex) path))]
-	(apply (pattern :fn) parameters)))))
+      (let [matches (re-matches (pattern :regex) path)]
+	(let [parameters (if (vector? matches) (rest matches) (list))]
+	  (apply (pattern :fn) parameters))))))
   
