@@ -1,5 +1,6 @@
 (ns pages.whiteboard
-  (:use compojure)
+  (:use compojure
+	pages.helpers)
   (:require [database :only (run-sql-query)]
 	     jquery))
 	    
@@ -22,22 +23,5 @@ nil)
        (map #(vector (% :album) (% :album)) 
 	    (database/run-sql-query "select distinct album from mp3s order by album")))]
      [:div {:id "albums-div"} "None"]
-     (javascript-tag
-      (jquery/eol 
-       (jquery/fncall
-	"change"
-	(jquery/selector "#artists-select")
-	(jquery/function
-	 '()
-	 (jquery/eol (jquery/defvar "str" "\"\""))
-	 (jquery/eol
-	  (jquery/fncall
-	   "each"
-	   (jquery/selector "#artists-select option:selected")
-	   (jquery/function
-	    '()
-	    (jquery/eol
-	     (jquery/j+= "str" (jquery/fncall "text" (jquery/selector)) "\", \"")))))
-	 (jquery/eol
-	  (jquery/fncall "text" (jquery/selector "#albums-div") "str"))))))
+     (embed-js "js/embedded/whiteboard1.js")
       ]]))
