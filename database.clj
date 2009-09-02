@@ -63,21 +63,6 @@ comments
   (sql/with-connection db
     (sql/with-query-results res (if (vector? query) query [query]) (doall res))))
 
-(defn list-artists 
-  ([] (list-artists nil))
-  ([search-string]
-     (sql/with-connection db
-			  (sql/with-query-results res [(str "select distinct artist from mp3s order by artist" (if (nil? search-string)
-											""
-											"") ; todo
-							    )]
-						  (map #(:artist %) (doall res))))))
-
-(defn list-albums []
-  (sql/with-connection db
-		       (sql/with-query-results res ["select distinct album from mp3s order by album"]
-						  (map #(:album %) (doall res)))))
-
 (defn simple-search [search-string]
   (sql/with-connection db
 		       (sql/with-query-results res

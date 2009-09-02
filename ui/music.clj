@@ -19,6 +19,7 @@
 			(proxy-super configureShell shell)
 			(doto shell
 			  (.setText "Melodien")
+			  (.setMinimumSize 535 400)
 			  (.setSize 1024 768)))
 	(createContents [parent]
 			; [artists][albums] list 10 entries
@@ -48,7 +49,19 @@
 							       (set! (. data right) (FormAttachment. 100 0))
 							       data)))
 			      ]
-			  (doseq [artist (filter #(not (nil? %)) (database/list-artists))] (.add artists-list artist))
+			  (let [songs (database/simple-search "")]
+			    (doseq [artist (distinct (map #(:artist %) songs))] 
+			      (.add artists-list artist))
+			    (doseq [album (sort (map #(:album %)
+						     (distinct (map #(hash-map :artist (:artist %)
+									       :album (:album %))
+								    songs))))]
+			      (.add albums-list album))
+			    (doseq [song songs]
+			      (.add songs-list (str (:title song) " | "
+						    (:track song) " | "
+						    (:artist song) " | "
+						    (:album song) " | "))))
 			  composite))
 	)
     (.setBlockOnOpen true)
