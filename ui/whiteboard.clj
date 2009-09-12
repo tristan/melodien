@@ -74,32 +74,43 @@
     
 		) ; /comment	 
 
-(defn do-interpolate-colour [percent colour1 colour2]
-  (if (= percent 100)
-    colour2
-    (Color. (.getDevice (GC. (.. Display getDefault)))
-	    (int (- (.getRed colour1) (* (- (.getRed colour1)
-					    (.getRed colour2))
-					 (/ percent 100.0))))
-	    (int (- (.getBlue colour1) (* (- (.getGreen colour1)
-					     (.getGreen colour2))
-					  (/ percent 100.0))))
-	    (int (- (.getBlue colour1) (* (- (.getBlue colour1)
-					     (.getBlue colour2))
-					  (/ percent 100.0)))))))
+(defn interpolate-colour [gc percent colour1 colour2]
+  (let [dev (.getDevice gc)]
+    (if (= percent 100)
+      colour2
+      (Color. dev
+	      (int (- (.getRed colour1) (* (- (.getRed colour1)
+					      (.getRed colour2))
+					   (/ percent 100.0))))
+	      (int (- (.getBlue colour1) (* (- (.getGreen colour1)
+					       (.getGreen colour2))
+					    (/ percent 100.0))))
+	      (int (- (.getBlue colour1) (* (- (.getBlue colour1)
+					       (.getBlue colour2))
+					    (/ percent 100.0))))))))
 
-(defn interpolate-colour 
-  ([widget reference fps run-time colour1 colour2]
-     (interpolate-colour widget reference (/ 1000 fps) 0 run-time colour1 colour2))
-  ([widget reference time-increment run-time end-time colour1 colour2]
+(comment
+(defn -interpolate-colour
+  [ag widget reference gc time-increment run-time end-time colour1 colour2]
+     (println "sent-off")
      (when (< run-time end-time)
-       (send-off *agent* #'interpolate-colour
-		 widget reference time-increment (+ time-increment run-time) end-time colour1 colour2))
-     (let [new-colour (do-interpolate-colour (* (/ run-time end-time) 100) colour1 colour2)]
+       (send-off *agent* #'-interpolate-colour
+		 widget reference gc time-increment (+ time-increment run-time) end-time colour1 colour2))
+     (println "trying to get new colour")
+     (let [new-colour (do-interpolate-colour gc (* (/ run-time end-time) 100) colour1 colour2)]
+       (println "setting new colour @ " run-time)
        (dosync (ref-set reference new-colour))
+       (.redraw widget)
        (when (< run-time end-time)
 	 (.dispose new-colour))
-       (. Thread (sleep time-increment)))))
+       (. Thread (sleep time-increment)))
+     nil)
+
+(defn interpolate-colour 
+  [ag widget reference gc fps run-time colour1 colour2]
+     (send-off *agent* #'-interpolate-colour widget reference (/ 1000 fps) 0 run-time colour1 colour2)
+     nil)
+)
 
 (defn window []
   (doto
@@ -112,7 +123,9 @@
 	(createContents [parent]
 			(let [comp (doto (Composite. parent SWT/NONE)
 				     (.setLayout (FormLayout.)))
-			      cb-colour (ref (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED))
+			      cb-state (ref {:state 'IDLE 
+					     :colour (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)
+					     :dispose? false})
 			      cb (Canvas. comp SWT/TRANSPARENT)]
 			  (.setLayoutData cb (let [data (FormData.)]
 					       (set! (. data top) (FormAttachment. 0 5))
@@ -123,46 +136,54 @@
 			  (.addPaintListener cb (proxy [PaintListener] []
 						  (paintControl [e]
 								(.setAlpha (. e gc) 255)
-								(.setBackground (. e gc)
-										@cb-colour)
-								(.fillRectangle (. e gc)
-										(. e x)
-										(. e y)
-										(. e width)
-										(. e height)))))
+								(if (= (:state @cb-state) 'INTERPOLATE)
+								  (if (< (:run-time @cb-state) (:end-time @cb-state))
+								    (let [new-colour (interpolate-colour
+										      (. e gc)
+										      (* (/ (:run-time @cb-state) (:end-time @cb-state)) 100)
+										      (:colour1 @cb-state)
+										      (:colour2 @cb-state))]
+								      (.setBackground (. e gc)
+										      new-colour)
+								      (.fillRectangle (. e gc)
+										      (. e x)
+										      (. e y)
+										      (. e width)
+										      (. e height))
+								      (.dispose new-colour)
+								      (dosync (ref-set cb-state {:state 'INTERPOLATE
+												 :run-time (+ (:run-time @cb-state) (:time-increment @cb-state))
+												 :time-increment (:time-increment @cb-state)
+												 :end-time (:end-time @cb-state)
+												 :colour1 (:colour1 @cb-state)
+												 :colour2 (:colour2 @cb-state)}))
+								      (.redraw cb)
+								      (. Thread (sleep (:time-increment @cb-state))))
+								    (do
+								      (dosync (ref-set cb-state {:state 'IDLE
+												 :colour (:colour2 @cb-state)}))
+								      (.redraw cb)))
+								  (do ; else if 'idle
+								    (.setBackground (. e gc)
+										    (:colour @cb-state))
+								    (.fillRectangle (. e gc)
+										    (. e x)
+										    (. e y)
+										    (. e width)
+										    (. e height))))
+								)))
 			  (.addMouseTrackListener cb (proxy [MouseTrackListener] []
 						       (mouseHover [e])
 						       (mouseEnter [e]
-								   (let [dev (.getDevice (GC. (.. Display getDefault)))]
-								     (letfn [(animation [colour1 colour2 percent wait]
-										      (when (not (= percent 100))
-											(send-off *agent* #'animation
-												  colour1 colour2
-												  (+ percent 10)
-												  wait))
-										      (let [new-colour (if (= percent 100)
-													 colour2
-													 (Color. dev
-													       (int (- (.getRed colour1) (* (- (.getRed colour1)
-																	       (.getRed colour2))
-																	    (/ percent 100.0))))
-													       (int (- (.getBlue colour1) (* (- (.getGreen colour1)
-																		(.getGreen colour2))
-																	     (/ percent 100.0))))
-													       (int (- (.getBlue colour1) (* (- (.getBlue colour1)
-																		(.getBlue colour2))
-																	     (/ percent 100.0))))))]
-											(dosync (ref-set cb-colour new-colour))
-											(.redraw cb)
-											(when (not (= percent 100))
-											  (.dispose new-colour))
-											(. Thread (sleep wait))))]
-								       (send-off (agent nil) #'animation (.getSystemColor dev SWT/COLOR_RED)
-										 (.getSystemColor dev SWT/COLOR_BLUE)
-										 10
-										 100))))
+								   (dosync (ref-set cb-state {:state 'INTERPOLATE
+											      :run-time 0
+											      :time-increment 10
+											      :end-time 500
+											      :colour1 (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)
+											      :colour2 (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_BLUE)}))
+								   (.redraw cb))								     
 						       (mouseExit [e]
-								  (dosync (ref-set cb-colour SWT/COLOR_RED))
+								  (dosync (ref-set cb-state {:colour (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)}))
 								  (.redraw cb))))
 			  cb))
 	)
