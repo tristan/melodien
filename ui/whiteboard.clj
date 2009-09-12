@@ -79,38 +79,25 @@
     (if (= percent 100)
       colour2
       (Color. dev
-	      (int (- (.getRed colour1) (* (- (.getRed colour1)
+	      (max 0 (min 255 (int (- (.getRed colour1) (* (- (.getRed colour1)
 					      (.getRed colour2))
-					   (/ percent 100.0))))
-	      (int (- (.getBlue colour1) (* (- (.getGreen colour1)
+					   (/ percent 100.0))))))
+	      (max 0 (min 255 (int (- (.getGreen colour1) (* (- (.getGreen colour1)
 					       (.getGreen colour2))
-					    (/ percent 100.0))))
-	      (int (- (.getBlue colour1) (* (- (.getBlue colour1)
+					    (/ percent 100.0))))))
+	      (max 0 (min 255 (int (- (.getBlue colour1) (* (- (.getBlue colour1)
 					       (.getBlue colour2))
-					    (/ percent 100.0))))))))
+					    (/ percent 100.0))))))))))
 
-(comment
-(defn -interpolate-colour
-  [ag widget reference gc time-increment run-time end-time colour1 colour2]
-     (println "sent-off")
-     (when (< run-time end-time)
-       (send-off *agent* #'-interpolate-colour
-		 widget reference gc time-increment (+ time-increment run-time) end-time colour1 colour2))
-     (println "trying to get new colour")
-     (let [new-colour (do-interpolate-colour gc (* (/ run-time end-time) 100) colour1 colour2)]
-       (println "setting new colour @ " run-time)
-       (dosync (ref-set reference new-colour))
-       (.redraw widget)
-       (when (< run-time end-time)
-	 (.dispose new-colour))
-       (. Thread (sleep time-increment)))
-     nil)
+(defmacro get-system-colour [colour]
+  (concat (list '.getSystemColor) (list (list '.getDevice (list 'GC. (list '.. 'Display 'getDefault))) colour)))
 
-(defn interpolate-colour 
-  [ag widget reference gc fps run-time colour1 colour2]
-     (send-off *agent* #'-interpolate-colour widget reference (/ 1000 fps) 0 run-time colour1 colour2)
-     nil)
-)
+(defn play [widget to from]
+  (let [tocolour (if (instance? java.lang.Integer to) (get-system-colour to) to)
+	fromcoluor (if (instance? java.lang.Integer from) (get-system-colour from) from)]))
+
+(defmacro colours-equal? [c1 c2]
+  (list '= (list '.getRGB c1) (list '.getRGB c2)))
 
 (defn window []
   (doto
@@ -124,8 +111,7 @@
 			(let [comp (doto (Composite. parent SWT/NONE)
 				     (.setLayout (FormLayout.)))
 			      cb-state (ref {:state 'IDLE 
-					     :colour (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)
-					     :dispose? false})
+					     :colour (get-system-colour SWT/COLOR_WHITE)})
 			      cb (Canvas. comp SWT/TRANSPARENT)]
 			  (.setLayoutData cb (let [data (FormData.)]
 					       (set! (. data top) (FormAttachment. 0 5))
@@ -135,51 +121,87 @@
 					       data))
 			  (.addPaintListener cb (proxy [PaintListener] []
 						  (paintControl [e]
-								(letfn [(dodraw [colour]
-									       (.setAlpha (. e gc) 255)
-									       (.setBackground (. e gc)
-											       colour)
-									       (.fillRectangle (. e gc)
-											       (. e x)
-											       (. e y)
-											       (. e width)
-											       (. e height)))]
-								  (if (= (:state @cb-state) 'INTERPOLATE)
-								    (if (< (:run-time @cb-state) (:end-time @cb-state))
-								      (let [new-colour (interpolate-colour
-											(. e gc)
-											(* (/ (:run-time @cb-state) (:end-time @cb-state)) 100)
-											(:colour1 @cb-state)
-											(:colour2 @cb-state))]
-									(dodraw new-colour)
-									(.dispose new-colour)
-									(dosync (ref-set cb-state {:state 'INTERPOLATE
-												   :run-time (+ (:run-time @cb-state) (:time-increment @cb-state))
-												   :time-increment (:time-increment @cb-state)
-												   :end-time (:end-time @cb-state)
-												   :colour1 (:colour1 @cb-state)
-												   :colour2 (:colour2 @cb-state)}))
-									(.redraw cb)
-									(. Thread (sleep (:time-increment @cb-state))))
-								      (do
+								;(println (.getSyncThread (.getDisplay cb)))
+								(let [interpolating? (= (:state @cb-state) 'INTERPOLATING-COLOR)
+								      ; this often is over 100%, dealt with below
+								      percent-done (and interpolating? (* 100.0 (/ (- (System/currentTimeMillis)
+														      (:start-time @cb-state))
+														   (:run-time @cb-state))))
+														      
+								      colour (if interpolating?
+									       (interpolate-colour (. e gc)
+												   ; use min to overcome values over 100%
+												   (min 100.0 percent-done)
+												   (:start-colour @cb-state)
+												   (:end-colour @cb-state))
+									       (:colour @cb-state))]
+								  ;(println interpolating? percent-done colour)
+								  (letfn [(dodraw [colour]
+										  (.setAlpha (. e gc) 255)
+										  (. (. e gc) setBackground
+										     colour)
+										  (.fillRectangle (. e gc)
+												  (. e x)
+												  (. e y)
+												  (. e width)
+												  (. e height)))]
+								    (dodraw colour)
+								    (when interpolating?
+								      (when (not (or (colours-equal? colour (:start-colour @cb-state))
+										   (colours-equal? colour (:end-colour @cb-state))))
+									(.dispose colour))
+								      (if (and interpolating? (>= percent-done 100))
 									(dosync (ref-set cb-state {:state 'IDLE
-												   :colour (:colour2 @cb-state)}))
-									(.redraw cb)))
-								    (dodraw (:colour @cb-state))))
-								)))
+												   :colour (:end-colour @cb-state)}))
+									; resize during interpolate causes this to be called too much
+									; needs fix
+									;(.asyncExec (.getDisplay cb)
+									; fixed: timerExec either eats the exceptions or is smart and
+									; avoids them. should probably figure out which
+									(.timerExec (.getDisplay cb)
+										    (/ 1000 (:target-fps @cb-state))
+										    (proxy [Runnable] []
+											(run []
+											     (when (not (.isDisposed cb))
+											       ;(. Thread (sleep (/ 1000 (:target-fps @cb-state))))
+											       (.redraw cb)))))))))
+								  )))
 			  (.addMouseTrackListener cb (proxy [MouseTrackListener] []
 						       (mouseHover [e])
 						       (mouseEnter [e]
-								   (dosync (ref-set cb-state {:state 'INTERPOLATE
-											      :run-time 0
-											      :time-increment 10
-											      :end-time 500
-											      :colour1 (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)
-											      :colour2 (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_BLUE)}))
-								   (.redraw cb))								     
+								   ;(play cb cb-state 'setBackground (get-system-color SWT/COLOR_BLUE) 
+								   ;(get-system-color SWT/COLOR_RED))
+								   ;(println (= (get-system-color SWT/COLOR_RED) (.getBackground cb)))
+								   ;(println (.getBackground cb))
+								   ;(println (get-system-color SWT/COLOR_RED))
+								   (let [idle? (= (:state @cb-state) 'IDLE)]
+								     (dosync (ref-set cb-state {:state 'INTERPOLATING-COLOR
+												:start-time (if idle?
+													      (System/currentTimeMillis)
+													      (- (System/currentTimeMillis)
+														 (- (+ (:start-time @cb-state)
+														       (:run-time @cb-state))
+														    (System/currentTimeMillis))))
+												:target-fps 8
+												:run-time 5000
+												:start-colour (get-system-colour SWT/COLOR_WHITE)
+												:end-colour (get-system-colour SWT/COLOR_BLACK)})))
+								   (.redraw cb))
 						       (mouseExit [e]
-								  (dosync (ref-set cb-state {:state 'IDLE
-											     :colour (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)}))
+								  ;(dosync (ref-set cb-state {:state 'IDLE
+								  ;:colour (get-system-colour SWT/COLOR_RED)}))
+								  (let [idle? (= (:state @cb-state) 'IDLE)]
+								     (dosync (ref-set cb-state {:state 'INTERPOLATING-COLOR
+												:start-time (if idle?
+													      (System/currentTimeMillis)
+													      (- (System/currentTimeMillis)
+														 (- (+ (:start-time @cb-state)
+														       (:run-time @cb-state))
+														    (System/currentTimeMillis))))
+												:target-fps 8
+												:run-time 5000
+												:start-colour (get-system-colour SWT/COLOR_BLACK)
+												:end-colour (get-system-colour SWT/COLOR_WHITE)})))
 								  (.redraw cb))))
 			  cb))
 	)
