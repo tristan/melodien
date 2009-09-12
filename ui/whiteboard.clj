@@ -135,42 +135,37 @@
 					       data))
 			  (.addPaintListener cb (proxy [PaintListener] []
 						  (paintControl [e]
-								(.setAlpha (. e gc) 255)
-								(if (= (:state @cb-state) 'INTERPOLATE)
-								  (if (< (:run-time @cb-state) (:end-time @cb-state))
-								    (let [new-colour (interpolate-colour
-										      (. e gc)
-										      (* (/ (:run-time @cb-state) (:end-time @cb-state)) 100)
-										      (:colour1 @cb-state)
-										      (:colour2 @cb-state))]
-								      (.setBackground (. e gc)
-										      new-colour)
-								      (.fillRectangle (. e gc)
-										      (. e x)
-										      (. e y)
-										      (. e width)
-										      (. e height))
-								      (.dispose new-colour)
-								      (dosync (ref-set cb-state {:state 'INTERPOLATE
-												 :run-time (+ (:run-time @cb-state) (:time-increment @cb-state))
-												 :time-increment (:time-increment @cb-state)
-												 :end-time (:end-time @cb-state)
-												 :colour1 (:colour1 @cb-state)
-												 :colour2 (:colour2 @cb-state)}))
-								      (.redraw cb)
-								      (. Thread (sleep (:time-increment @cb-state))))
-								    (do
-								      (dosync (ref-set cb-state {:state 'IDLE
-												 :colour (:colour2 @cb-state)}))
-								      (.redraw cb)))
-								  (do ; else if 'idle
-								    (.setBackground (. e gc)
-										    (:colour @cb-state))
-								    (.fillRectangle (. e gc)
-										    (. e x)
-										    (. e y)
-										    (. e width)
-										    (. e height))))
+								(letfn [(dodraw [colour]
+									       (.setAlpha (. e gc) 255)
+									       (.setBackground (. e gc)
+											       colour)
+									       (.fillRectangle (. e gc)
+											       (. e x)
+											       (. e y)
+											       (. e width)
+											       (. e height)))]
+								  (if (= (:state @cb-state) 'INTERPOLATE)
+								    (if (< (:run-time @cb-state) (:end-time @cb-state))
+								      (let [new-colour (interpolate-colour
+											(. e gc)
+											(* (/ (:run-time @cb-state) (:end-time @cb-state)) 100)
+											(:colour1 @cb-state)
+											(:colour2 @cb-state))]
+									(dodraw new-colour)
+									(.dispose new-colour)
+									(dosync (ref-set cb-state {:state 'INTERPOLATE
+												   :run-time (+ (:run-time @cb-state) (:time-increment @cb-state))
+												   :time-increment (:time-increment @cb-state)
+												   :end-time (:end-time @cb-state)
+												   :colour1 (:colour1 @cb-state)
+												   :colour2 (:colour2 @cb-state)}))
+									(.redraw cb)
+									(. Thread (sleep (:time-increment @cb-state))))
+								      (do
+									(dosync (ref-set cb-state {:state 'IDLE
+												   :colour (:colour2 @cb-state)}))
+									(.redraw cb)))
+								    (dodraw (:colour @cb-state))))
 								)))
 			  (.addMouseTrackListener cb (proxy [MouseTrackListener] []
 						       (mouseHover [e])
@@ -183,7 +178,8 @@
 											      :colour2 (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_BLUE)}))
 								   (.redraw cb))								     
 						       (mouseExit [e]
-								  (dosync (ref-set cb-state {:colour (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)}))
+								  (dosync (ref-set cb-state {:state 'IDLE
+											     :colour (.getSystemColor (.getDevice (GC. (.. Display getDefault))) SWT/COLOR_RED)}))
 								  (.redraw cb))))
 			  cb))
 	)
